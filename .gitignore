@@ -1,0 +1,6 @@
+/docs/
+/qiyuan/client/150.0.7871.115/
+.idea/
+**/__pycache__/
+*.py[cod]
+/examples/.demo_data/

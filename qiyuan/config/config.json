@@ -1,0 +1,6 @@
+{
+  "base_api_path": "http://127.0.0.1:9003",
+  "base_local_api_path": "http://127.0.0.1:9003",
+  "browser_base_path": "http://127.0.0.1:9003",
+  "fingerprint":{"version":"2.0","encrypt_type":"aes","aes_value":"+Agxf52VeOuzcW4E8DjpngpcaCzsG+tnfKGBvLpO6ko="}
+}

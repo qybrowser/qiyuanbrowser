@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Qiyuan MS",
+  "version": "1.3.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtFawYTIQUNqdYfq8qZSxfUZucz24NRo59ptN0lWrr28//2TQWi5X5NBojvzcaIup6UhpQRYebQB/lBPYhqvD+17aEz7R+8PCfLFkZBDkK0mQ3Dy3Xm0KhYpTlsHPMwkt1nTAlAAvuqosNYxLAjHWysFdMKl2MqOCc2pBXmSjmsZwap0jk3B5JINisbvdoc8BAq1cv+qGlQTvDx0RgNvW0roIE4noijxHtsK0EF9CqrA5/l+yaiZb70+dODjdwNIeLAG76LTkc66O6obzV5mfbSGdpLT0OsmJ9h5lVzwGEiZ8zsLJdN5yrAs6D12+vtE095NlRPmAjfTiT/o0ELo4MwIDAQAB",
+  "description": "Manages Manager System",
+  "permissions": [
+    "cookies",
+    "storage",
+    "qiyuan",
+    "localhost",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "icons": {
+    "16": "icons/16x16.png",
+    "48": "icons/48x48.png",
+    "128": "icons/128x128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/16x16.png",
+      "48": "icons/48x48.png",
+      "128": "icons/128x128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background/service_worker.js",
+    "type": "module"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["pages/*.html", "pages/*.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content_scripts/injector.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}
