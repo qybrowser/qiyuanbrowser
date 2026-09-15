@@ -135,7 +135,7 @@ http://127.0.0.1:9003
 
 也可以扫描下方二维码联系作者：
 
-![启元指纹浏览器作者客服二维码](https://res.usefullc.com/fingerprint/qiyuan_kefu.jpg)
+<img src="https://res.usefullc.com/fingerprint/qiyuan_kefu.jpg" width="260" alt="启元指纹浏览器作者客服微信二维码">
 
 二维码无法显示时，可直接访问：[联系作者](https://res.usefullc.com/fingerprint/qiyuan_kefu.jpg)。
 
