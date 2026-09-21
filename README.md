@@ -46,6 +46,7 @@
 - Windows 10 或更高版本
 - Python 3.10 及以上版本
 - Git
+- Node.js 18 及以上版本（用于构建管理界面）
 
 启元浏览器由服务端和客户端组成：
 
@@ -75,11 +76,36 @@ cd qiyuanbrowser
 
 下载完成后不要将内核复制到源码目录，后续会通过客户端管理页面上传并安装。
 
-### 3. 启动服务端
+### 3. 构建管理界面
 
-```bash
-pip install -r requirements.txt
-python -m admin.server --config browser-config-server.json
+首次启动前，需要先构建前端管理界面。在项目根目录执行：
+
+```powershell
+cd admin\frontend
+npm install
+npm run build
+cd ..\..
+```
+
+构建完成后，项目会生成 `admin/static/dist/index.html`。如果缺少该文件，启动服务端或客户端后访问页面会提示“管理界面尚未构建”。
+
+### 4. 创建 Python 虚拟环境
+
+在项目根目录执行：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+项目会在根目录创建 `.venv` 虚拟环境。后续启动服务端和客户端时，均使用该虚拟环境中的 Python。
+
+> 如果使用命令提示符（CMD），可将 Python 路径写为 `.venv\Scripts\python.exe`。
+
+### 5. 启动服务端
+
+```powershell
+.\.venv\Scripts\python.exe -m admin.server --config browser-config-server.json
 ```
 
 服务端启动后默认监听：
@@ -90,7 +116,7 @@ http://127.0.0.1:9003
 
 服务端只负责保存和管理环境、代理、扩展等数据，不负责启动本地浏览器。
 
-### 4. 启动客户端
+### 6. 启动客户端
 
 确认 `browser-config-client.json` 中的地址配置正确：
 
@@ -103,9 +129,8 @@ http://127.0.0.1:9003
 
 然后在项目根目录执行：
 
-```bash
-pip install -r requirements.txt
-python -m admin.client --config browser-config-client.json
+```powershell
+.\.venv\Scripts\python.exe -m admin.client --config browser-config-client.json
 ```
 
 客户端启动后，打开：
@@ -116,7 +141,7 @@ http://127.0.0.1:9005
 
 客户端页面用于管理本机浏览器应用数据目录和浏览器内核。
 
-### 5. 上传并安装浏览器内核
+### 7. 上传并安装浏览器内核
 
 进入客户端 `9005` 地址后，打开左侧的“系统设置”。
 
@@ -142,7 +167,7 @@ http://127.0.0.1:9003
 
 ![服务端环境管理页面](assets/images/qiyuan-sdk-admin.png)
 
-### 功能测试
+### 8. 功能测试
 
 启动浏览器环境后，可以测试以下功能：
 

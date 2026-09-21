@@ -2,7 +2,6 @@
 /browser/client/150.0.7871.115/
 /browser/client/153.0.4/
 /admin/frontend/node_modules/
-/admin/static/dist/
 .idea/
 **/__pycache__/
 *.py[cod]
