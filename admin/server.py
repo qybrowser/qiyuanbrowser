@@ -1,10 +1,4 @@
-"""Management admin for the Chromium SDK.
-
-A thin FastAPI app that exposes all 14 operations over HTTP using the same
-paths and ``{success, data|error}`` envelope as the Electron client's open API,
-and serves a single-page management UI. Everything is driven through
-:class:`chromium_sdk.ChromiumClient`, so the HTTP layer and the in-process SDK
-share identical logic and the same SQLite store.
+"""Qiyuan SDK management app; server and local routes live in separate modules.
 
 Run:
     uvicorn admin.server:app --reload
@@ -19,385 +13,139 @@ import shutil
 import logging
 import sys
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlparse
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from admin.event_loop import configure_windows_event_loop
 
-from chromium_sdk import ChromiumClient
-from chromium_sdk.errors import SdkError
-from chromium_sdk.gpu_fingerprint import get_gpu_options
+# Resolve command-line overrides before qiyuan_config is imported.  These are
+# intentionally limited to SDK runtime settings; the HTTP listener address is
+# derived from base_local_api_path in the configuration.
+def _command_line_value(*names: str) -> str | None:
+    for name in names:
+        prefix = name + "="
+        for index, argument in enumerate(sys.argv):
+            if argument == name:
+                if index + 1 >= len(sys.argv):
+                    raise RuntimeError(f"{name} requires a value")
+                return sys.argv[index + 1]
+            if argument.startswith(prefix):
+                return argument[len(prefix):]
+    return None
+
+
+_config_value = _command_line_value("--config")
+if _config_value:
+    os.environ["QIYUAN_CONFIG_PATH"] = os.path.abspath(_config_value)
+_api_value = _command_line_value("--base-api-path")
+if _api_value:
+    os.environ["QIYUAN_BASE_API_PATH"] = _api_value.rstrip("/")
+_local_api_value = _command_line_value("--base-local-api-path")
+if _local_api_value:
+    os.environ["QIYUAN_BASE_LOCAL_API_PATH"] = _local_api_value.rstrip("/")
+_token_value = _command_line_value("--token")
+if _token_value:
+    os.environ["QIYUAN_CLI_TOKEN"] = _token_value
+
+if "QIYUAN_CONFIG_PATH" not in os.environ:
+    _server_config = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "browser-config-server.json"))
+    if os.path.isfile(_server_config):
+        os.environ["QIYUAN_CONFIG_PATH"] = _server_config
+
+# QyBrowser opens and sometimes cancels loopback requests during startup.
+# On Windows, the Proactor/AcceptEx path can lose the listening socket after
+# such a cancellation (WinError 64). Configure the policy before Uvicorn
+# creates its server loop.
+configure_windows_event_loop()
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+from sdk import ChromiumClient
+from sdk import qiyuan_config
 from admin.logging_setup import configure_logging
 
 DATA_DIR = os.environ.get("CHROMIUM_SDK_DATA_DIR")
-BASE_API_PATH = os.environ.get("CHROMIUM_SDK_BASE_API")
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+LOCAL_API_PATH_OVERRIDE = (
+    os.environ.get("QIYUAN_BASE_LOCAL_API_PATH")
+    or os.environ.get("CHROMIUM_SDK_BASE_LOCAL_API")
+    or os.environ.get("CHROMIUM_SDK_BASE_API")
+)
+SERVER_API_PATH = (
+    os.environ.get("QIYUAN_BASE_API_PATH")
+    or qiyuan_config.bundled_browser_config().get("base_api_path")
+    or "http://127.0.0.1:9003"
+)
+LOCAL_API_PATH = (
+    LOCAL_API_PATH_OVERRIDE
+    or qiyuan_config.bundled_browser_config().get("base_local_api_path")
+    or "http://127.0.0.1:9003"
+)
+if getattr(sys, "frozen", False):
+    # PyInstaller stores the frontend data under the explicit ``admin`` data
+    # directory in the temporary extraction root.
+    STATIC_DIR = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(__file__)), "admin", "static")
+else:
+    STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+FRONTEND_DIST = os.path.join(STATIC_DIR, "dist")
+PROCESS_ROLE = os.environ.get("QIYUAN_PROCESS_ROLE", "server").lower()
+if PROCESS_ROLE not in ("server", "client"):
+    raise RuntimeError("QIYUAN_PROCESS_ROLE must be server or client")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log_path = configure_logging(client.data_dir)
-    logging.getLogger(__name__).info("管理服务启动；数据库: %s；日志: %s", client.storage.db_path, log_path)
+    database = server_client.storage.db_path if server_client else "远程服务端 " + SERVER_API_PATH
+    logging.getLogger(__name__).info("管理服务启动；角色: %s；数据库: %s；日志: %s", PROCESS_ROLE, database, log_path)
+    print(f"管理服务启动；角色: {PROCESS_ROLE}")
     try:
         yield
     finally:
         logging.getLogger(__name__).info("管理服务停止")
 
 
-app = FastAPI(title="Chromium SDK Admin", version="0.1.0", lifespan=lifespan)
-client = ChromiumClient(data_dir=DATA_DIR, base_api_path=BASE_API_PATH)
+app = FastAPI(title="Qiyuan SDK Admin", version="0.1.0", lifespan=lifespan)
+if os.path.isdir(FRONTEND_DIST):
+    app.mount("/static/dist", StaticFiles(directory=FRONTEND_DIST), name="frontend")
+server_client = ChromiumClient(data_dir=DATA_DIR, base_api_path=LOCAL_API_PATH_OVERRIDE, server_role=True) if PROCESS_ROLE == "server" else None
+local_client = ChromiumClient(data_dir=DATA_DIR, base_api_path=LOCAL_API_PATH_OVERRIDE, remote_api_path=SERVER_API_PATH) if PROCESS_ROLE == "client" else None
+client = local_client or server_client
+
+
+def _local_listener_port() -> int:
+    """Use the configured API URL for the listener port."""
+    endpoint = SERVER_API_PATH if PROCESS_ROLE == "server" else LOCAL_API_PATH
+    try:
+        port = urlparse(endpoint).port
+        return int(port or 9003)
+    except (TypeError, ValueError):
+        return 9003
 
 
 def _initialize_default_browser_dir() -> None:
     """Seed the default browser directory once, preserving any existing files."""
-    from chromium_sdk import qiyuan_config
-
     target = qiyuan_config.default_qiyuan_dir()
-    source = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "qiyuan"))
-    # Older setups often pointed at the bundled source directory itself.
-    if os.path.normcase(client.browser_app_data_dir) == os.path.normcase(source):
-        client.set_browser_app_data_dir(target)
     if os.path.normcase(client.browser_app_data_dir) != os.path.normcase(target):
-        return  # A manually selected directory is managed by the user.
-    if qiyuan_config.inspect_qiyuan_dir(target)["valid"]:
-        if client.storage.get_config("default_browser_dir_initialized") != "1":
-            client.storage.set_config("default_browser_dir_initialized", "1")
-        return
-
+        target = client.browser_app_data_dir
     for name in ("client", "config", "extends"):
-        source_dir = os.path.join(source, name)
-        if not os.path.isdir(source_dir):
-            raise RuntimeError(f"缺少浏览器初始化目录: {source_dir}")
-    for name in ("client", "config", "extends"):
-        source_dir = os.path.join(source, name)
-        for root, dirs, files in os.walk(source_dir):
-            relative = os.path.relpath(root, source_dir)
-            destination = os.path.join(target, name, relative)
-            os.makedirs(destination, exist_ok=True)
-            for filename in files:
-                output = os.path.join(destination, filename)
-                if not os.path.exists(output):
-                    shutil.copy2(os.path.join(root, filename), output)
-
-    if not qiyuan_config.inspect_qiyuan_dir(target)["valid"]:
-        raise RuntimeError(f"浏览器初始化后目录仍不完整: {target}")
+        os.makedirs(os.path.join(target, name), exist_ok=True)
+    config_target = qiyuan_config.ensure_qiyuan_config(
+        client.local_api_path, browser_app_data_dir=target
+    )
+    public_key = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sdk", "keys", "rsa_public.pem"))
+    public_key_target = os.path.join(target, "config", "rsa_public.pem")
+    if os.path.isfile(public_key) and not os.path.exists(public_key_target):
+        shutil.copy2(public_key, public_key_target)
     client.storage.set_config("default_browser_dir_initialized", "1")
-    qiyuan_config.ensure_qiyuan_config(client.base_api_path, browser_app_data_dir=target)
 
 
-_initialize_default_browser_dir()
+if PROCESS_ROLE == "client":
+    _initialize_default_browser_dir()
 
 
-def ok(data: Any = None) -> JSONResponse:
-    """Open-API envelope (matches the Electron client)."""
-    return JSONResponse({"success": True, "data": data})
-
-
-def err(message: str) -> JSONResponse:
-    return JSONResponse({"success": False, "error": message})
-
-
-def api_ok(data: Any = None, message: str = "OK") -> JSONResponse:
-    """Backend-style ApiResponse envelope (for /api/v1/* the browser calls)."""
-    return JSONResponse({"code": 200, "message": message, "data": data, "success": True})
-
-
-def api_err(message: str, code: int = 400) -> JSONResponse:
-    return JSONResponse({"code": code, "message": message, "data": None, "success": False})
-
-
-def _bearer(request: Request) -> Optional[str]:
-    auth = request.headers.get("authorization", "")
-    return auth[7:] if auth.startswith("Bearer ") else None
-
-
-async def _run(handler: Callable[[Dict[str, Any]], Any], request: Request) -> JSONResponse:
-    """Parse JSON body, invoke handler, wrap result/errors in the envelope."""
-    try:
-        body = await request.json() if await request.body() else {}
-    except Exception:
-        body = {}
-    try:
-        return ok(handler(body or {}))
-    except SdkError as exc:
-        return err(str(exc))
-    except Exception as exc:  # pragma: no cover - defensive
-        logging.getLogger(__name__).exception("请求处理失败")
-        return err(f"内部错误: {exc}")
-
-
-def _qp(request: Request) -> Dict[str, str]:
-    return dict(request.query_params)
-
-
-# ----------------------------------------------------------------- UI / static
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
-
-
-@app.get("/open/settings/browser")
-def browser_settings() -> JSONResponse:
-    return ok(client.browser_settings())
-
-
-@app.post("/open/settings/browser")
-async def browser_settings_save(request: Request) -> JSONResponse:
-    return await _run(
-        lambda b: client.set_browser_app_data_dir(b.get("browser_app_data_dir")),
-        request,
-    )
-
-
-# ---- browser start page / error page (browser_base_path -> this server) ----
-# The kernel navigates to {browser_base_path}/pages/home.html?md5=... and
-# {browser_base_path}/pages/error.html?code=... These pages fetch same-origin.
-@app.get("/pages/home.html", response_class=HTMLResponse)
-def page_home() -> HTMLResponse:
-    return HTMLResponse(HOME_PAGE_HTML)
-
-
-@app.get("/pages/error.html", response_class=HTMLResponse)
-def page_error() -> HTMLResponse:
-    return HTMLResponse(ERROR_PAGE_HTML)
-
-
-@app.get("/api/v1/browser/home-data/{md5}")
-def browser_home_data(md5: str) -> JSONResponse:
-    try:
-        return api_ok(client.browser_home_data(md5))
-    except SdkError as exc:
-        return api_err(str(exc), code=404)
-
-
-@app.get("/api/v1/browser/error-data/{code}")
-def browser_error_data(code: str) -> JSONResponse:
-    return api_ok(client.browser_error_data(code))
-
-
-@app.get("/api/check-network")
-def check_network() -> JSONResponse:
-    """Direct (no-proxy) IP geo for the start page. No auth."""
-    return JSONResponse(client.ip_geo(""))
-
-
-# ----------------------------------------------------------------- environments
-@app.get("/open/env/list")
-def env_list(request: Request) -> JSONResponse:
-    q = _qp(request)
-    try:
-        return ok(client.env_list(
-            page=int(q.get("page", 1)),
-            page_size=int(q.get("page_size", 20)),
-            keyword=q.get("keyword", ""),
-        ))
-    except SdkError as exc:
-        return err(str(exc))
-
-
-@app.get("/open/env/detail")
-def env_detail(request: Request) -> JSONResponse:
-    code = _qp(request).get("code", "")
-    try:
-        return ok(client.env_detail(code))
-    except SdkError as exc:
-        return err(str(exc))
-
-
-@app.post("/open/env/create")
-async def env_create(request: Request) -> JSONResponse:
-    return await _run(lambda b: client.env_create(**b), request)
-
-
-@app.post("/open/env/update")
-async def env_update(request: Request) -> JSONResponse:
-    return await _run(
-        lambda b: client.env_update(b.pop("code", ""), **b), request
-    )
-
-
-@app.post("/open/env/delete")
-async def env_delete(request: Request) -> JSONResponse:
-    return await _run(lambda b: client.env_delete(b.get("code", "")), request)
-
-
-@app.post("/open/env/randomize_fingerprint")
-async def env_randomize(request: Request) -> JSONResponse:
-    return await _run(
-        lambda b: client.env_randomize_fingerprint(b.get("code", "")), request
-    )
-
-
-@app.post("/open/env/open")
-async def env_open(request: Request) -> JSONResponse:
-    return await _run(
-        lambda b: client.env_open(b.get("code", ""), args=b.get("args")), request
-    )
-
-
-@app.post("/open/env/close")
-async def env_close(request: Request) -> JSONResponse:
-    return await _run(lambda b: client.env_close(b.get("code", "")), request)
-
-
-@app.get("/open/env/status")
-def env_status(request: Request) -> JSONResponse:
-    code = _qp(request).get("code", "")
-    try:
-        return ok(client.env_status(code))
-    except SdkError as exc:
-        return err(str(exc))
-
-
-@app.post("/open/env/clear_cache")
-async def env_clear_cache(request: Request) -> JSONResponse:
-    return await _run(lambda b: client.env_clear_cache(b.get("code", "")), request)
-
-
-# ----------------------------------------------------------------------- proxies
-@app.get("/open/proxy/list")
-def proxy_list(request: Request) -> JSONResponse:
-    q = _qp(request)
-    return ok(client.proxy_list(
-        page=int(q.get("page", 1)),
-        page_size=int(q.get("page_size", 20)),
-        keyword=q.get("keyword", ""),
-    ))
-
-
-@app.post("/open/proxy/create")
-async def proxy_create(request: Request) -> JSONResponse:
-    return await _run(lambda b: client.proxy_create(**b), request)
-
-
-@app.post("/open/proxy/update")
-async def proxy_update(request: Request) -> JSONResponse:
-    return await _run(
-        lambda b: client.proxy_update(b.pop("code", ""), **b), request
-    )
-
-
-@app.post("/open/proxy/delete")
-async def proxy_delete(request: Request) -> JSONResponse:
-    return await _run(lambda b: client.proxy_delete(b.get("code", "")), request)
-
-
-# ------------------------------------------------------------------- fingerprint
-@app.post("/open/fingerprint/generate")
-async def fingerprint_generate(request: Request) -> JSONResponse:
-    return await _run(
-        lambda b: client.generate_fingerprint(b.get("platform", "Win32")), request
-    )
-
-
-@app.get("/open/gpu-options")
-def open_gpu_options() -> JSONResponse:
-    return ok(get_gpu_options())
-
-
-@app.get("/api/v1/browser/gpu-options")
-def browser_gpu_options() -> JSONResponse:
-    """Same payload as backend GET /api/v1/browser/gpu-options."""
-    return api_ok(get_gpu_options())
-
-
-# =====================================================================
-#  Server callbacks — called by the launched client browser
-# =====================================================================
-
-@app.get("/api/v1/browser/md5/{uuid}")
-def browser_md5(
-    uuid: str,
-    request: Request,
-    secure: bool = True,
-    encrypt_type: str = "aes",
-    version: str = "1.0",
-) -> JSONResponse:
-    """拉取指纹。Authorization: Bearer {token}
-
-    - secure: 是否加密，默认 true（是）；false 则返回明文，encrypt_type 忽略。
-    - encrypt_type: 加密方式，默认 aes，支持 aes / rsa。
-    - version: 算法版本，默认 1.0；2.0 且 aes 时 key 由固定key+"_qiyuan_"+token 派生。
-    """
-    token = _bearer(request)
-    if not client.verify_token(token):
-        return api_err("unauthorized", code=401)
-    try:
-        if not secure:
-            return api_ok(client.get_fingerprint_payload(uuid))
-        return api_ok(client.get_encrypted_fingerprint(uuid, encrypt_type, version, token))
-    except SdkError as exc:
-        code = 404 if "不存在" in str(exc) else 400
-        return api_err(str(exc), code=code)
-
-
-@app.post("/api/v1/browser/error/report")
-async def browser_error_report(request: Request) -> JSONResponse:
-    """错误上报（无需 token）。body {title, detail, type} -> {data:{code}}"""
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    try:
-        data = client.report_error(
-            body.get("title", ""), body.get("detail", ""), body.get("type", "")
-        )
-        return api_ok(data, message="错误已上报")
-    except SdkError as exc:
-        return api_err(str(exc))
-
-
-@app.post("/api/v1/client/browser/tabs")
-async def client_browser_tabs(request: Request) -> JSONResponse:
-    """标签上报。过滤内部/无效链接，按域名去重并最多保存 5 条。"""
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    result = client.update_tabs(body.get("md5", ""), body.get("tabs", ""))
-    return api_ok(result)
-
-
-@app.post("/api/check-proxy")
-async def check_proxy(request: Request) -> JSONResponse:
-    """代理检测。body {proxy_type, proxy_addr, proxy_port, username, password}"""
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    return JSONResponse(client.check_proxy(body))
-
-
-@app.get("/api/ip-geo")
-def ip_geo(request: Request, ip: str = "") -> JSONResponse:
-    """IP 地理。Bearer 鉴权。"""
-    if not client.verify_token(_bearer(request)):
-        return JSONResponse({"success": False, "error": "unauthorized"})
-    return JSONResponse(client.ip_geo(ip))
-
-
-@app.post("/api/browser/status")
-async def browser_status(request: Request) -> JSONResponse:
-    """开关状态。body {uuid, status:"opened"|"closed"}"""
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    uuid = body.get("uuid")
-    if not uuid:
-        return JSONResponse({"success": False, "error": "missing uuid"})
-    client.record_status(uuid, str(body.get("status", "")))
-    return JSONResponse({"success": True})
-
-
-# =====================================================================
-#  Browser start page / error page (ported from
-#  front-extends/fingerprint-manager/pages, using same-origin fetch
-#  instead of the chrome.runtime extension bridge)
-# =====================================================================
-
+# Same-origin page assets; the route modules decide where they are served.
 HOME_PAGE_HTML = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -583,7 +331,25 @@ ERROR_PAGE_HTML = r"""<!DOCTYPE html>
 </html>"""
 
 
+from admin import server_api, local_api
+
+if server_client:
+    server_api.bind_client(server_client)
+server_api.bind_pages(HOME_PAGE_HTML, ERROR_PAGE_HTML, FRONTEND_DIST)
+local_api.bind_pages(STATIC_DIR, FRONTEND_DIST, HOME_PAGE_HTML, ERROR_PAGE_HTML)
+if PROCESS_ROLE == "server":
+    app.include_router(server_api.router)
+if PROCESS_ROLE == "client":
+    local_api.bind_client(local_client)
+    app.include_router(local_api.router)
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=9003)
+    uvicorn.run(
+        app,
+        host="0.0.0.0" if PROCESS_ROLE == "server" else "127.0.0.1",
+        port=_local_listener_port(),
+        loop="admin.event_loop:selector_loop_factory",
+    )

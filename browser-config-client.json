@@ -1,0 +1,27 @@
+{
+  "base_api_path": "http://127.0.0.1:9003",
+  "base_local_api_path": "http://127.0.0.1:9005",
+  "api_token": "eyO4ro0zE8oywX6NbMI6Eu3Q12l2obVHgyS7yKVMD3Q",
+  "kernels": {
+    "chrome": {
+      "default_version": "150.0.7871.115",
+      "versions": ["150.0.7871.115", "150.0.7871.116"]
+    },
+    "firefox": {
+      "default_version": "153.0.4",
+      "versions": ["153.0.4"]
+    }
+  },
+  "extensions": {
+    "storage": "local",
+    "cache_dir": "extension-cache",
+    "oss": {
+      "enabled": false,
+      "endpoint": "",
+      "bucket": "",
+      "prefix": "",
+      "access_key_env": "QIYUAN_OSS_ACCESS_KEY",
+      "secret_key_env": "QIYUAN_OSS_SECRET_KEY"
+    }
+  }
+}
