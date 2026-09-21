@@ -445,14 +445,28 @@ class ChromiumClient:
         env = self._refresh_api_proxy(env)
         if not env.get("browser_version"):
             raise ValidationError("该环境未配置内核版本")
+        kernel = "firefox" if env.get("browser_kernel") == "firefox" else "chrome"
+        if not qiyuan_config.kernel_installed(
+            str(env["browser_version"]), kernel, self.browser_app_data_dir
+        ):
+            kernel_name = "Firefox" if kernel == "firefox" else "Chromium"
+            raise ValidationError(
+                f"{kernel_name} {env['browser_version']} 内核未安装，请在客户端 9005 的系统设置中上传对应内核"
+            )
         # ensure the launched browser calls back into our admin server
         status = self.browser_settings()
         if not status["valid"]:
-            missing = [name for name, present in status["checks"].items() if not present]
-            raise ValidationError(
-                "浏览器应用数据目录无效，请在“浏览器设置”中配置 browser_app_data_dir；"
-                f"缺失项: {', '.join(missing)}"
-            )
+            missing = [
+                name for name, present in status["checks"].items()
+                if name != "executable" and not present
+            ]
+            if not missing:
+                missing = []
+            if missing:
+                raise ValidationError(
+                    "浏览器应用数据目录无效，请在“浏览器设置”中配置 browser_app_data_dir；"
+                    f"缺失项: {', '.join(missing)}"
+                )
         qiyuan_config.ensure_qiyuan_config(
             self.local_api_path, browser_app_data_dir=self.browser_app_data_dir
         )

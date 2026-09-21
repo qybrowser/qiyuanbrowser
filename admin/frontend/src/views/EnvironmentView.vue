@@ -16,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, clientProcessMessage, isClientProcess, query } from '../api/client'
 import type { Environment, Page } from '../types'
@@ -53,4 +53,11 @@ async function remove(code: string) {
   catch (error) { if (error !== 'cancel') ElMessage.error(String(error)) }
 }
 onMounted(() => load())
+let refreshTimer: number | undefined
+onMounted(() => {
+  if (isClient) refreshTimer = window.setInterval(() => load(), 3000)
+})
+onUnmounted(() => {
+  if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
+})
 </script>

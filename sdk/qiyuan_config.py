@@ -16,6 +16,11 @@ DEFAULT_KERNEL_CONFIG_PATH = os.path.join(
     _CONFIG_ROOT,
     "browser-config-client.json" if os.environ.get("QIYUAN_PROCESS_ROLE", "server").lower() == "client" else "browser-config-server.json",
 )
+DEFAULT_FINGERPRINT_CONFIG = {
+    "version": "2.0",
+    "encrypt_type": "aes",
+    "aes_value": "+Agxf52VeOuzcW4E8DjpngpcaCzsG+tnfKGBvLpO6ko=",
+}
 
 
 def kernel_config_path() -> str:
@@ -271,10 +276,8 @@ def ensure_qiyuan_config(
         if value and data.get(key) != value:
             data[key] = value
             changed = True
-    # Fingerprint settings are stored per environment, never in the browser
-    # bootstrap configuration.
-    if "fingerprint" in data:
-        data.pop("fingerprint", None)
+    if "fingerprint" not in data:
+        data["fingerprint"] = dict(DEFAULT_FINGERPRINT_CONFIG)
         changed = True
 
     if changed:

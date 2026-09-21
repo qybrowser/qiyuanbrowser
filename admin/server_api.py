@@ -183,6 +183,22 @@ def browser_home_data(md5: str) -> JSONResponse:
         return api_err(str(exc), code=404)
 
 
+@router.get("/api/check-network")
+def check_network() -> JSONResponse:
+    """Direct IP geo lookup used by the browser start page."""
+    return JSONResponse(client.ip_geo(""))
+
+
+@router.post("/api/check-proxy")
+async def check_proxy(request: Request) -> JSONResponse:
+    """Proxy IP geo lookup used by the browser start page."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return JSONResponse(client.check_proxy(body))
+
+
 @router.get("/api/v1/browser/error-data/{code}")
 def browser_error_data(code: str) -> JSONResponse:
     return api_ok(client.browser_error_data(code))

@@ -11,7 +11,7 @@ from sdk import ChromiumClient
 from sdk.errors import SdkError
 from sdk.gpu_fingerprint import get_gpu_options
 from admin.http_utils import (ok, err, api_ok, api_err, bearer as _bearer,
-                              run as _run, query_params as _qp)
+                              run as _run, query_params as _qp, positive_int as _positive_int)
 
 router = APIRouter(tags=["Local API"])
 client: ChromiumClient
@@ -158,6 +158,20 @@ def env_status(request: Request) -> JSONResponse:
 @router.post("/open/env/clear_cache")
 async def env_clear_cache(request: Request) -> JSONResponse:
     return await _run(lambda b: (client.env_clear_cache(b.get("code", "")), None)[1], request)
+
+
+@router.get("/open/env/list")
+def env_list(request: Request) -> JSONResponse:
+    """Return environment data with process state checked by this client."""
+    q = _qp(request)
+    try:
+        return ok(client.env_list(
+            page=_positive_int(q.get("page"), 1),
+            page_size=_positive_int(q.get("page_size"), 20),
+            keyword=q.get("keyword", ""),
+        ))
+    except SdkError as exc:
+        return err(str(exc))
 
 
 @router.post("/open/extension/sync")
