@@ -164,12 +164,6 @@ http://127.0.0.1:9003
 - 分别启动 Chromium 和 Firefox 环境；
 - 查看启动后的 IP、地理位置、WebRTC、WebGL、时区、语言、Canvas 等相关指纹信息。
 
-### 实际运行效果
-
-启动服务后，可以在启元指纹浏览器管理后台统一管理浏览器环境、代理和指纹配置：
-
-![启元指纹浏览器管理后台，可创建、编辑和启动独立浏览器环境](assets/images/qiyuan-browser-admin.png)
-
 打开浏览器环境后，启动页会显示当前 IP、地理位置、代理方式以及 WebRTC、WebGL、时区、语言、Canvas 等浏览器指纹信息：
 
 ![启元指纹浏览器启动后的环境信息与浏览器指纹配置](assets/images/qiyuan-browser-environment.png)
