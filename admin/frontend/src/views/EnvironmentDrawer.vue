@@ -1,11 +1,12 @@
 <template>
   <el-drawer v-model="visible" :title="form.code ? '编辑环境' : '创建环境'" size="min(1050px, 100%)" destroy-on-close>
     <div class="section-nav"><button v-for="part in sections" :key="part.id" @click="jump(part.id)">{{ part.label }}</button></div>
+    <el-alert v-if="!isClient" title="当前为服务端 9003 页面；浏览器内核安装、随机指纹生成等本地操作请在客户端 9005 中进行。" type="info" :closable="false" style="margin-bottom:18px" />
     <el-form label-width="112px">
       <div id="env-basic" class="section-title">基本信息</div>
       <el-form-item label="环境名称"><el-input v-model="form.name" placeholder="请输入环境名称" /></el-form-item>
       <el-form-item label="浏览器内核"><el-radio-group v-model="form.browser_kernel" @change="changeKernel"><el-radio value="chrome">Chromium</el-radio><el-radio value="firefox">Firefox</el-radio></el-radio-group></el-form-item>
-      <el-form-item label="内核版本"><el-select v-model="form.browser_version" style="width:100%"><el-option v-for="version in kernelVersions" :key="version" :label="version" :value="version" /></el-select></el-form-item>
+      <el-form-item label="内核版本"><el-select v-if="isClient" v-model="form.browser_version" style="width:100%"><el-option v-for="version in kernelVersions" :key="version" :label="version" :value="version" /></el-select><el-input v-else v-model="form.browser_version" placeholder="请填写已在客户端 9005 安装的版本" /></el-form-item>
       <el-form-item label="操作系统"><el-select v-model="form.platform" style="width:100%" @change="changePlatform"><el-option label="Windows" value="Win32" /><el-option label="macOS" value="MacIntel" /><el-option label="Linux" value="Linux x86_64" /></el-select></el-form-item>
       <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       <div id="env-proxy" class="section-title">代理设置</div>
@@ -26,7 +27,7 @@
       <el-form-item label="Cookie"><el-input v-model="form.cookie" type="textarea" :rows="3" placeholder='JSON 数组，例如 [{"domain":".example.com","name":"key","value":"value"}]' /><div class="muted">可选；使用 JSON 数组格式，留空表示不导入 Cookie。</div></el-form-item>
       <div id="env-fingerprint" class="section-title">指纹设置</div>
       <el-collapse v-model="fingerprintOpen"><el-collapse-item name="fingerprint" title="展开指纹设置（可选）">
-        <div class="toolbar"><el-button :loading="randomizing" @click="randomize">生成随机指纹</el-button><span class="muted">不修改时使用默认随机指纹。</span></div>
+        <div class="toolbar"><el-button :loading="randomizing" @click="isClient ? randomize() : requireClient()">{{ isClient ? '生成随机指纹' : '生成随机指纹（请在 9005 操作）' }}</el-button><span class="muted">不修改时使用默认随机指纹。</span></div>
         <el-form-item label="User Agent"><el-input v-model="form.user_agent" type="textarea" :rows="2" placeholder="留空自动生成" /></el-form-item>
         <FingerprintFields :fp="form.fingerprint" :platform="form.platform" :kernel="form.browser_kernel" />
       </el-collapse-item></el-collapse>
@@ -38,7 +39,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api, query } from '../api/client'
+import { api, clientProcessMessage, isClientProcess, query } from '../api/client'
 import type { Environment, Kernel, KernelCatalog, Page, Proxy } from '../types'
 import FingerprintFields from './FingerprintFields.vue'
 
@@ -52,6 +53,8 @@ const blank = (): Form => ({ code: '', name: '', browser_kernel: 'chrome', brows
   launch_args: '', cookie: '', user_agent: '', fingerprint: {} })
 const form = reactive<Form>(blank())
 const visible = ref(false), saving = ref(false), randomizing = ref(false), fingerprintOpen = ref<string[]>([])
+const isClient = isClientProcess
+function requireClient() { ElMessage.info(clientProcessMessage) }
 const kernels = ref<KernelCatalog | null>(null), proxies = ref<Proxy[]>([])
 const sections = [{ id: 'env-basic', label: '基本信息' }, { id: 'env-proxy', label: '代理设置' }, { id: 'env-tabs', label: '标签页与启动' }, { id: 'env-fingerprint', label: '指纹设置' }]
 const kernelVersions = computed(() => kernels.value?.[form.browser_kernel]?.versions || [])
@@ -59,15 +62,16 @@ function jump(id: string) { document.getElementById(id)?.scrollIntoView({ behavi
 function changeKernel() { form.browser_version = kernels.value?.[form.browser_kernel]?.default_version || ''; form.user_agent = '' }
 async function changePlatform() { form.user_agent = ''; await randomize() }
 async function references() {
-  const [catalog, page] = await Promise.all([
-    api<KernelCatalog>('/open/settings/kernels'),
+  const requests: [Promise<KernelCatalog | null>, Promise<Page<Proxy>>] = [
+    isClient ? api<KernelCatalog>('/open/settings/kernels') : Promise.resolve(null),
     api<Page<Proxy>>(query('/open/proxy/list', { page: 1, page_size: 100, keyword: '' })),
-  ])
+  ]
+  const [catalog, page] = await Promise.all(requests)
   kernels.value = catalog; proxies.value = page.items
 }
 async function create() {
   Object.assign(form, blank()); fingerprintOpen.value = []
-  try { await references(); changeKernel(); form.fingerprint = await api<Record<string, any>>('/open/fingerprint/draft', { platform: form.platform }); form.fingerprint.webgl_type = 'real'; form.fingerprint.webgpu_type = 'real'; form.fingerprint.speech_voices = true; visible.value = true }
+  try { await references(); changeKernel(); form.fingerprint = isClient ? await api<Record<string, any>>('/open/fingerprint/draft', { platform: form.platform }) : {}; form.fingerprint.webgl_type = 'real'; form.fingerprint.webgpu_type = 'real'; form.fingerprint.speech_voices = true; visible.value = true }
   catch (error) { ElMessage.error(String(error)) }
 }
 async function edit(code: string) {
@@ -79,6 +83,7 @@ async function edit(code: string) {
   } catch (error) { ElMessage.error(String(error)) }
 }
 async function randomize() {
+  if (!isClient) return requireClient()
   randomizing.value = true
   try { form.fingerprint = await api<Record<string, any>>('/open/fingerprint/draft', { platform: form.platform }); ElMessage.success('已生成随机指纹，保存后生效') }
   catch (error) { ElMessage.error(String(error)) }

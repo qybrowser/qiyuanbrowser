@@ -7,7 +7,7 @@
       <el-table-column label="类型" width="125"><template #default="{ row }"><el-tag :type="row.proxy_input_type === 'api' ? 'warning' : 'info'">{{ row.proxy_input_type === 'api' ? 'API 提取' : '手动代理' }}</el-tag></template></el-table-column>
       <el-table-column prop="code" label="编码" min-width="170" show-overflow-tooltip />
       <el-table-column prop="create_time" label="创建时间" width="175" />
-      <el-table-column label="操作" width="210"><template #default="{ row }"><el-button link type="primary" @click="edit(row.code)">编辑</el-button><el-button link type="success" :loading="checking === row.code" @click="check({ code: row.code }, row.code)">检测</el-button><el-button link type="danger" @click="remove(row.code)">删除</el-button></template></el-table-column>
+      <el-table-column label="操作" width="230"><template #default="{ row }"><el-button link type="primary" @click="edit(row.code)">编辑</el-button><el-button v-if="isClient" link type="success" :loading="checking === row.code" @click="check({ code: row.code }, row.code)">检测</el-button><el-button v-else link type="info" @click="requireClient">检测（9005）</el-button><el-button link type="danger" @click="remove(row.code)">删除</el-button></template></el-table-column>
     </el-table>
     <el-pagination v-model:current-page="page" :page-size="20" :total="data.total" layout="total, prev, pager, next" style="justify-content:flex-end;margin-top:18px" @current-change="load" />
   </div>
@@ -24,7 +24,7 @@
         <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password /></el-form-item>
       </template>
       <el-form-item v-else label="API 链接"><el-input v-model="form.proxy_api_url" placeholder="https://example.com/get，返回 ip:port" /></el-form-item>
-      <el-form-item><el-button :loading="checking === 'draft'" @click="check(form, 'draft')">{{ form.proxy_input_type === 'api' ? '测试提取并检测' : '检测连通性' }}</el-button></el-form-item>
+      <el-form-item><el-button :loading="checking === 'draft'" @click="isClient ? check(form, 'draft') : requireClient()">{{ isClient ? (form.proxy_input_type === 'api' ? '测试提取并检测' : '检测连通性') : '检测（请在 9005 操作）' }}</el-button></el-form-item>
     </el-form>
     <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存</el-button></template>
   </el-dialog>
@@ -33,7 +33,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { api, query } from '../api/client'
+import { api, clientProcessMessage, isClientProcess, query } from '../api/client'
 import type { Page, Proxy } from '../types'
 
 type ProxyForm = Proxy & { password: string; username: string }
@@ -42,6 +42,8 @@ const form = reactive<ProxyForm>(empty())
 const data = ref<Page<Proxy>>({ items: [], total: 0, page: 1, page_size: 20, total_pages: 0 })
 const page = ref(1), keyword = ref(''), dialog = ref(false), loading = ref(false), saving = ref(false), checking = ref('')
 const checkResult = ref<(Record<string, any> & { success: boolean }) | null>(null)
+const isClient = isClientProcess
+function requireClient() { ElMessage.info(clientProcessMessage) }
 async function load(target = page.value) {
   loading.value = true; page.value = target
   try { data.value = await api<Page<Proxy>>(query('/open/proxy/list', { page: target, page_size: 20, keyword: keyword.value })) }

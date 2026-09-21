@@ -1,5 +1,10 @@
 export type ApiResult<T> = { success: true; data?: T } | { success: false; error: string }
 
+// The same UI is served by both processes. Local browser operations are only
+// available from the client process listening on port 9005.
+export const isClientProcess = typeof window !== 'undefined' && window.location.port === '9005'
+export const clientProcessMessage = '该操作需要在客户端 9005 中进行，请打开客户端后重试'
+
 export async function api<T>(path: string, body?: object): Promise<T> {
   const response = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',

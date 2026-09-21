@@ -41,9 +41,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { api } from '../api/client'
+import { ElMessage } from 'element-plus'
+import { api, clientProcessMessage, isClientProcess } from '../api/client'
 import type { Kernel } from '../types'
 const props = defineProps<{ fp: Record<string, any>; platform: string; kernel: Kernel }>()
+const isClient = isClientProcess
 const noiseFields = [{ key: 'font', label: '字体' }, { key: 'canvas', label: 'Canvas' }, { key: 'audio', label: '音频' }, { key: 'client_rects', label: 'ClientRects' }]
 const resolutions = ['1920|1080', '2560|1440', '3840|2160', '1366|768', '1440|900', '1536|864', '1600|900', '1680|1050', '1280|720', '1280|800', '1280|1024', '2048|1152', '2560|1080', '3440|1440']
 type GpuRenderer = { webgl_renderer: string; webgpu: { vendor: string; architecture: string; device: string; description: string } }
@@ -71,8 +73,9 @@ const nativeProtection = computed({ get: () => Boolean(props.fp.native_fp_protec
 function noiseMode(key: string) { const value = props.fp[key]; return value === 0 || value === null || (Array.isArray(value) && !value.length) ? 'disabled' : 'random' }
 async function setNoise(key: string, mode: string) {
   if (mode === 'disabled') { props.fp[key] = key === 'media_devices' || key === 'font_list' ? null : 0; return }
+  if (!isClient) { ElMessage.info(clientProcessMessage); return }
   const draft = await api<Record<string, any>>('/open/fingerprint/draft', { platform: props.platform })
   props.fp[key] = draft[key]
 }
-onMounted(async () => { try { gpuOptions.value = await api('/open/gpu-options') } catch { /* Free-text GPU input remains available. */ } })
+onMounted(async () => { if (!isClient) return; try { gpuOptions.value = await api('/open/gpu-options') } catch { /* Free-text GPU input remains available. */ } })
 </script>

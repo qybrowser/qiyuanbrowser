@@ -1,6 +1,6 @@
 # 启元指纹浏览器（Qiyuan Fingerprint Browser）
 
-启元指纹浏览器是一款基于 Chromium 和 Python 的开源指纹浏览器，支持创建相互隔离的浏览器环境，并为不同环境配置独立的浏览器指纹与网络代理。项目在本地运行，提供可视化管理后台，适合多账号管理、跨境电商、广告投放、自动化测试和浏览器指纹研究等场景。
+启元指纹浏览器是一款基于 Chromium、Firefox 和 Python 的开源指纹浏览器，支持创建相互隔离的浏览器环境，并为不同环境配置独立的浏览器指纹与网络代理。项目在本地运行，提供可视化管理后台，适合多账号管理、跨境电商、广告投放、自动化测试和浏览器指纹研究等场景。
 
 > 请在遵守目标网站服务条款及所在地法律法规的前提下使用本项目。
 
@@ -41,7 +41,17 @@
 
 ## 三、快速开始
 
-当前项目适用于 Windows。请先安装 Git 和 Python，再按以下步骤安装启元指纹浏览器。
+当前项目适用于 Windows 系统。开始前请准备：
+
+- Windows 10 或更高版本
+- Python 3.10 及以上版本
+- Git
+
+启元浏览器由服务端和客户端组成：
+
+- 服务端运行在 `9003` 端口，负责保存和管理环境、代理、扩展等数据；
+- 客户端运行在 `9005` 端口，负责管理本机浏览器资源和已安装内核；
+- 浏览器内核需要先从 GitHub Releases 下载，再通过客户端页面上传安装。
 
 ### 1. 下载项目源码
 
@@ -50,48 +60,98 @@ git clone https://github.com/qybrowser/qiyuanbrowser.git
 cd qiyuanbrowser
 ```
 
-### 2. 下载 Chromium 浏览器内核
+### 2. 下载浏览器内核
 
-打开项目的 [GitHub Releases](https://github.com/qybrowser/qiyuanbrowser/releases)，进入最新版本，在 **Assets** 中下载以版本号命名的浏览器内核压缩包，例如 `150.0.7871.115.zip`。不要下载 GitHub 自动生成的 `Source code (zip)` 或 `Source code (tar.gz)`，它们不包含可运行的浏览器内核。
+打开项目的 [GitHub Releases](https://github.com/qybrowser/qiyuanbrowser/releases)，进入最新版本，在 **Assets** 中下载需要的浏览器内核压缩包。
 
-![在 GitHub Releases 的 Assets 中下载启元指纹浏览器 Chromium 内核](assets/images/github-release-browser-kernel.png)
+当前支持：
 
-下载完成后，将内核解压到源码的 `qiyuan/client/` 目录。版本号必须作为内核的直接目录，结构如下：
+- Chromium，例如 `chromium-150.0.7871.115.zip`
+- Firefox，例如 `firefox-153.0.4.zip`
 
-```text
-qiyuanbrowser/
-└── qiyuan/
-    └── client/
-        └── 150.0.7871.115/
-            ├── QyBrowser.exe
-            ├── chrome.dll
-            ├── 150.0.7871.115.manifest
-            └── ...
-```
+不要下载 GitHub 自动生成的 `Source code (zip)` 或 `Source code (tar.gz)`，它们不包含可运行的浏览器内核。
 
-> **重要：**目录层级必须与上面保持一致，即 `qiyuan/client/<内核版本>/QyBrowser.exe`。不要多套一层同名目录，也不要把内核文件直接放在 `client` 下，否则程序将无法找到浏览器内核。
+![在 GitHub Releases 的 Assets 中下载 Chromium 和 Firefox 浏览器内核](assets/images/github-release-browser-kernel.png)
 
-### 3. 安装 Python 依赖
+下载完成后不要将内核复制到源码目录，后续会通过客户端管理页面上传并安装。
 
-在项目根目录执行：
+### 3. 启动服务端
 
 ```bash
 pip install -r requirements.txt
+python -m admin.server --config browser-config-server.json
 ```
 
-### 4. 启动管理后台
-
-```bash
-python -m admin.server
-```
-
-服务启动后，在浏览器中访问：
+服务端启动后默认监听：
 
 ```text
 http://127.0.0.1:9003
 ```
 
-进入管理后台后，即可创建浏览器环境、配置代理与指纹并启动环境。首次启动会将仓库内的浏览器文件初始化到 `%USERPROFILE%/.qiyuan`，所需时间可能比后续启动稍长。
+服务端只负责保存和管理环境、代理、扩展等数据，不负责启动本地浏览器。
+
+### 4. 启动客户端
+
+确认 `browser-config-client.json` 中的地址配置正确：
+
+```json
+{
+  "base_api_path": "http://127.0.0.1:9003",
+  "base_local_api_path": "http://127.0.0.1:9005"
+}
+```
+
+然后在项目根目录执行：
+
+```bash
+pip install -r requirements.txt
+python -m admin.client --config browser-config-client.json
+```
+
+客户端启动后，打开：
+
+```text
+http://127.0.0.1:9005
+```
+
+客户端页面用于管理本机浏览器应用数据目录和浏览器内核。
+
+### 5. 上传并安装浏览器内核
+
+进入客户端 `9005` 地址后，打开左侧的“系统设置”。
+
+在“更新内核”区域中：
+
+1. 选择内核类型：Chromium 或 Firefox；
+2. 填写内核版本号；
+3. 选择从 GitHub Releases 下载的 ZIP 文件；
+4. 如需设置为默认版本，勾选“设为默认版本”；
+5. 点击“上传并安装”。
+
+客户端会自动将内核解压到浏览器应用数据目录的 `client/<内核版本>/` 下，无需手动复制文件。
+
+![客户端系统设置和浏览器内核上传页面](assets/images/qiyuan-sdk-settings.png)
+
+安装完成后，返回服务端管理页面：
+
+```text
+http://127.0.0.1:9003
+```
+
+在“环境管理”中创建浏览器环境，选择 Chromium 或 Firefox 内核，然后配置代理、扩展和指纹参数并启动环境。
+
+![服务端环境管理页面](assets/images/qiyuan-sdk-admin.png)
+
+### 功能测试
+
+启动浏览器环境后，可以测试以下功能：
+
+- 创建和管理多个独立浏览器环境；
+- 配置 HTTP、HTTPS 或 SOCKS5 代理；
+- 配置浏览器指纹参数；
+- 安装和管理浏览器扩展；
+- 分别启动 Chromium 和 Firefox 环境；
+- 查看启动后的 IP、地理位置、WebRTC、WebGL、时区、语言、Canvas 等相关指纹信息。
 
 ### 实际运行效果
 
